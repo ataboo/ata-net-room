@@ -1,4 +1,4 @@
-src/ata-net-room
+src/ata-net-room*
 src/server.crt
 src/server.key
 .vscode

@@ -53,7 +53,6 @@ type RestServer struct {
 
 func (s *RestServer) ListenAndServe() error {
 	return http.ListenAndServeTLS(s.config.Host, "server.crt", "server.key", s.mux)
-	//return http.ListenAndServe(s.config.Host, s.mux)
 }
 
 func WriteJSON(w http.ResponseWriter, r *http.Request, data interface{}, status int) {
