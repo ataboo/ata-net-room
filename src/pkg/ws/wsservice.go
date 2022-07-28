@@ -70,17 +70,21 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *WSJoinRequest) {
 	if ok, messages := s.validate(req); !ok {
 		res := WSResponse{
 			Type:      JoinReject,
-			SendTime:  time.Now(),
-			RelayTime: time.Now(),
+			SendTime:  time.Now().UnixMilli(),
+			RelayTime: time.Now().UnixMilli(),
+			Payload:   MustEncodeBase64Payload(messages),
+			ID:        GenUniqueID(),
 		}
-		res.SetPayload(messages)
 
 		conn.SetWriteDeadline(time.Now().Add(WriteWait))
 		conn.WriteJSON(res)
+
+		conn.Close()
+		return
 	}
 
 	if req.AllowCreate {
-
+		newRoom := WSRoom{}
 	}
 }
 

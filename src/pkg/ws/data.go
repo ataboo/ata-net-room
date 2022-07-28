@@ -3,29 +3,30 @@ package ws
 import (
 	"encoding/base64"
 	"encoding/json"
-	"time"
+
+	"github.com/google/uuid"
 )
 
-type RequestType string
+type RequestType int
 
 const (
-	JoinReq    RequestType = "join"
-	LeaveReq   RequestType = "leave"
-	LockReq    RequestType = "lock"
-	UnlockReq  RequestType = "unlock"
-	GameEvtReq RequestType = "game"
+	GameEvtReq RequestType = 0
+	JoinReq    RequestType = 1
+	LeaveReq   RequestType = 2
+	LockReq    RequestType = 3
+	UnlockReq  RequestType = 4
 )
 
-type ResponseType string
+type ResponseType int
 
 const (
-	JoinReject    ResponseType = "join_reject"
-	YouJoinRes    ResponseType = "join_you"
-	PlayerJoinRes ResponseType = "join_player"
-	LeaveRes      ResponseType = ResponseType(LeaveReq)
-	LockRes       ResponseType = ResponseType(LockReq)
-	UnlockRes     ResponseType = ResponseType(UnlockReq)
-	GameEvtRes    ResponseType = ResponseType(GameEvtReq)
+	GameEvtRes    ResponseType = 0
+	JoinReject    ResponseType = 1
+	YouJoinRes    ResponseType = 2
+	PlayerJoinRes ResponseType = 3
+	LeaveRes      ResponseType = 4
+	LockRes       ResponseType = 5
+	UnlockRes     ResponseType = 6
 )
 
 type ServerConfig struct {
@@ -36,7 +37,9 @@ type ServerConfig struct {
 
 type WSRequest struct {
 	Type     RequestType `json:"type"`
-	SendTime time.Time   `json:"send"`
+	SendTime int64       `json:"send"`
+	ID       string      `json:"id,omitempty"`
+	Name     string      `json:"name,omitempty"`
 	Payload  string      `json:"payload,omitempty"`
 }
 
@@ -50,27 +53,31 @@ type WSJoinRequest struct {
 
 type WSResponse struct {
 	Type      ResponseType `json:"type"`
-	SendTime  time.Time    `json:"send"`
-	RelayTime time.Time    `json:"relay,omitempty"`
+	SendTime  int64        `json:"send"`
+	RelayTime int64        `json:"relay"`
+	ID        string       `json:"id,omitempty"`
+	Name      string       `json:"name,omitempty"`
 	Payload   string       `json:"payload,omitempty"`
 }
 
-func (r *WSResponse) SetPayload(v interface{}) error {
-	m, err := json.Marshal(v)
+func MustEncodeBase64Payload(v interface{}) string {
+	encoded, err := EncodeBase64Payload(v)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
-	r.Payload = base64.RawStdEncoding.EncodeToString(m)
-	return nil
+	return encoded
 }
 
-func (r *WSRequest) SetPayload(v interface{}) error {
+func EncodeBase64Payload(v interface{}) (payload string, err error) {
 	m, err := json.Marshal(v)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	r.Payload = base64.RawStdEncoding.EncodeToString(m)
-	return nil
+	return base64.RawStdEncoding.EncodeToString(m), nil
+}
+
+func GenUniqueID() string {
+	return uuid.NewString()
 }
