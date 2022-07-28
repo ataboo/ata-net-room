@@ -1,20 +1,11 @@
-package ws
+package msg
 
 import (
 	"encoding/base64"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
-)
-
-type RequestType int
-
-const (
-	GameEvtReq RequestType = 0
-	JoinReq    RequestType = 1
-	LeaveReq   RequestType = 2
-	LockReq    RequestType = 3
-	UnlockReq  RequestType = 4
 )
 
 type ResponseType int
@@ -29,26 +20,9 @@ const (
 	UnlockRes     ResponseType = 6
 )
 
-type ServerConfig struct {
-	Host         string
-	RoomCapacity int
-	Subprotocol  string
-}
-
-type WSRequest struct {
-	Type     RequestType `json:"type"`
-	SendTime int64       `json:"send"`
-	ID       string      `json:"id,omitempty"`
-	Name     string      `json:"name,omitempty"`
-	Payload  string      `json:"payload,omitempty"`
-}
-
-type WSJoinRequest struct {
-	RoomCode    string `json:"room_code"`
-	AllowCreate bool   `json:"create"`
-	PlayerName  string `json:"player_name"`
-	GameID      string `json:"game_id"`
-	RoomSize    int    `json:"room_size"`
+type PlayerIDPayload struct {
+	PlayerID        int   `json:"id"`
+	OtherPlayersIDs []int `json:"players"`
 }
 
 type WSResponse struct {
@@ -58,6 +32,31 @@ type WSResponse struct {
 	ID        string       `json:"id,omitempty"`
 	Name      string       `json:"name,omitempty"`
 	Payload   string       `json:"payload,omitempty"`
+}
+
+func NewRejectJoinResponse(messages ...string) WSResponse {
+	return WSResponse{
+		Type:      JoinReject,
+		SendTime:  time.Now().UnixMilli(),
+		RelayTime: time.Now().UnixMilli(),
+		Payload:   MustEncodeBase64Payload(messages),
+		ID:        GenUniqueID(),
+	}
+}
+
+func NewJoinResponse(youJoin bool, payload PlayerIDPayload) WSResponse {
+	resType := PlayerJoinRes
+	if youJoin {
+		resType = YouJoinRes
+	}
+
+	return WSResponse{
+		Type:      resType,
+		SendTime:  time.Now().UnixMilli(),
+		RelayTime: time.Now().UnixMilli(),
+		Payload:   MustEncodeBase64Payload(payload),
+		ID:        GenUniqueID(),
+	}
 }
 
 func MustEncodeBase64Payload(v interface{}) string {

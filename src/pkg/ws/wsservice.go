@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ataboo/ata-net-room/pkg/common"
+	"github.com/ataboo/ata-net-room/pkg/ws/msg"
 	"github.com/gorilla/websocket"
 )
 
@@ -15,7 +16,15 @@ const (
 	MaxMessageSize = 512
 	ReadWait       = 3 * time.Second
 	WriteWait      = 3 * time.Second
+	PongWait       = 60 * time.Second
+	PingPeriod     = 50 * time.Second
 )
+
+type ServerConfig struct {
+	Host         string
+	RoomCapacity int
+	Subprotocol  string
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -29,7 +38,7 @@ var upgrader = websocket.Upgrader{
 
 type WSService struct {
 	config ServerConfig
-	Rooms  map[string]WSRoom
+	Rooms  map[string]*WSRoom
 }
 
 func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
@@ -51,14 +60,14 @@ func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
 
 	conn.SetReadLimit(MaxMessageSize)
 	conn.SetReadDeadline(time.Now().Add(ReadWait))
-	mType, msg, err := conn.ReadMessage()
+	mType, msgBytes, err := conn.ReadMessage()
 	if mType != websocket.BinaryMessage || err != nil {
 		common.LogfDebug("expected binary message")
 		conn.Close()
 	}
 
-	req := WSJoinRequest{}
-	if err := json.Unmarshal(msg, &req); err != nil {
+	req := msg.WSJoinRequest{}
+	if err := json.Unmarshal(msgBytes, &req); err != nil {
 		common.LogfDebug("failed to unmarshal message: %s", err.Error())
 		conn.Close()
 	}
@@ -66,29 +75,37 @@ func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
 	s.createOrJoinRoom(conn, &req)
 }
 
-func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *WSJoinRequest) {
+func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinRequest) {
 	if ok, messages := s.validate(req); !ok {
-		res := WSResponse{
-			Type:      JoinReject,
-			SendTime:  time.Now().UnixMilli(),
-			RelayTime: time.Now().UnixMilli(),
-			Payload:   MustEncodeBase64Payload(messages),
-			ID:        GenUniqueID(),
-		}
-
-		conn.SetWriteDeadline(time.Now().Add(WriteWait))
-		conn.WriteJSON(res)
-
+		WriteResponse(conn, msg.NewRejectJoinResponse(messages...))
 		conn.Close()
 		return
 	}
 
-	if req.AllowCreate {
-		newRoom := WSRoom{}
+	room, ok := s.Rooms[req.GameID]
+	if !ok && req.AllowCreate {
+		newRoom := NewWSRoom(req)
+		if err := newRoom.Start(); err != nil {
+			WriteResponse(conn, msg.NewRejectJoinResponse("failed to create room"))
+			conn.Close()
+			return
+		}
+
+		s.Rooms[req.GameID] = newRoom
+		room = newRoom
+	} else {
+		if !ok {
+			WriteResponse(conn, msg.NewRejectJoinResponse("room not found"))
+			conn.Close()
+			return
+		}
 	}
+
+	WriteResponse()
+
 }
 
-func (s *WSService) validate(req *WSJoinRequest) (ok bool, messages []string) {
+func (s *WSService) validate(req *msg.WSJoinRequest) (ok bool, messages []string) {
 	messages = make([]string, 0)
 
 	if req == nil {
@@ -131,6 +148,6 @@ func (s *WSService) hasSubProtocolHeader(r *http.Request) bool {
 func NewWSService(config ServerConfig) *WSService {
 	return &WSService{
 		config: config,
-		Rooms:  make(map[string]WSRoom),
+		Rooms:  make(map[string]*WSRoom),
 	}
 }
