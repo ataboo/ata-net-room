@@ -7,7 +7,7 @@ import (
 
 func main() {
 	server := rest.NewRestServer(ws.ServerConfig{
-		Host:         ":3000",
+		Host:         ":5000",
 		RoomCapacity: 10,
 		Subprotocol:  "atanet_v1",
 	})

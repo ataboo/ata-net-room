@@ -2,7 +2,6 @@ package ws
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -37,8 +36,9 @@ var upgrader = websocket.Upgrader{
 }
 
 type WSService struct {
-	config ServerConfig
-	Rooms  map[string]*WSRoom
+	config        ServerConfig
+	Rooms         map[string]*WSRoom
+	roomCloseChan chan *WSRoom
 }
 
 func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
@@ -64,12 +64,14 @@ func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
 	if mType != websocket.BinaryMessage || err != nil {
 		common.LogfDebug("expected binary message")
 		conn.Close()
+		return
 	}
 
 	req := msg.WSJoinRequest{}
 	if err := json.Unmarshal(msgBytes, &req); err != nil {
 		common.LogfDebug("failed to unmarshal message: %s", err.Error())
 		conn.Close()
+		return
 	}
 
 	s.createOrJoinRoom(conn, &req)
@@ -84,12 +86,14 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinReques
 
 	room, ok := s.Rooms[req.GameID]
 	if !ok && req.AllowCreate {
-		newRoom := NewWSRoom(req)
-		if err := newRoom.Start(); err != nil {
+		if len(s.Rooms) >= s.config.RoomCapacity {
 			WriteResponse(conn, msg.NewRejectJoinResponse("failed to create room"))
 			conn.Close()
 			return
 		}
+
+		newRoom := NewWSRoom(req, s.roomCloseChan)
+		newRoom.Start()
 
 		s.Rooms[req.GameID] = newRoom
 		room = newRoom
@@ -99,10 +103,13 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinReques
 			conn.Close()
 			return
 		}
+
+		if room.Locked || len(room.Clients) >= room.Capacity {
+			WriteResponse(conn, msg.NewRejectJoinResponse("join not allowed"))
+		}
 	}
 
-	WriteResponse()
-
+	room.AddUser(conn)
 }
 
 func (s *WSService) validate(req *msg.WSJoinRequest) (ok bool, messages []string) {
@@ -110,6 +117,7 @@ func (s *WSService) validate(req *msg.WSJoinRequest) (ok bool, messages []string
 
 	if req == nil {
 		messages = append(messages, "no request provided")
+		return len(messages) == 0, messages
 	}
 
 	if ok, err := regexp.Match("^[A-Z]{4,10}$", []byte(req.RoomCode)); !ok || err != nil {
@@ -136,13 +144,22 @@ func (s *WSService) validate(req *msg.WSJoinRequest) (ok bool, messages []string
 
 func (s *WSService) hasSubProtocolHeader(r *http.Request) bool {
 	for _, sub := range websocket.Subprotocols(r) {
-		fmt.Printf("Checking sub: %s\n", sub)
+		common.LogfDebug("Checking sub: %s\n", sub)
 		if sub == s.config.Subprotocol {
+			common.LogfDebug("Protocol match!")
 			return true
 		}
 	}
 
 	return false
+}
+
+func (s *WSService) Start() {
+	go func() {
+		for room := range s.roomCloseChan {
+			delete(s.Rooms, room.Code)
+		}
+	}()
 }
 
 func NewWSService(config ServerConfig) *WSService {

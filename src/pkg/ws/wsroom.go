@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"github.com/ataboo/ata-net-room/pkg/common"
 	"github.com/ataboo/ata-net-room/pkg/ws/msg"
 	"github.com/gorilla/websocket"
 )
@@ -10,14 +11,15 @@ type WSRoom struct {
 	Capacity  int
 	Locked    bool
 	Clients   map[int]*WSClient
-	MaxID     int
+	maxID     int
 	leaveChan chan *WSClient
 	reqChan   chan *msg.WSRequest
+	closeChan chan<- *WSRoom
 }
 
 func (r *WSRoom) AddUser(conn *websocket.Conn) error {
-	r.MaxID += 1
-	id := r.MaxID
+	r.maxID += 1
+	id := r.maxID
 
 	otherPlayerIDs := make([]int, len(r.Clients))
 	for i, c := range r.Clients {
@@ -25,13 +27,13 @@ func (r *WSRoom) AddUser(conn *websocket.Conn) error {
 	}
 
 	payload := msg.PlayerIDPayload{
-		PlayerID:        id,
-		OtherPlayersIDs: otherPlayerIDs,
+		SubjectID: id,
+		PlayerIDs: otherPlayerIDs,
 	}
 
 	youRes := msg.NewJoinResponse(true, payload)
 	if err := WriteResponse(conn, youRes); err != nil {
-		return err
+		common.LogfInfo("failed to send you join %s", err)
 	}
 
 	joinRes := msg.NewJoinResponse(false, payload)
@@ -44,18 +46,19 @@ func (r *WSRoom) AddUser(conn *websocket.Conn) error {
 }
 
 func (r *WSRoom) BroadcastResponse(res msg.WSResponse) {
-
+	panic("not implemented")
 }
 
-func NewWSRoom(req *msg.WSJoinRequest) *WSRoom {
+func NewWSRoom(req *msg.WSJoinRequest, closeChan chan<- *WSRoom) *WSRoom {
 	return &WSRoom{
 		Code:      req.RoomCode,
 		Capacity:  req.RoomSize,
 		Locked:    false,
 		Clients:   map[int]*WSClient{},
-		MaxID:     0,
+		maxID:     0,
 		leaveChan: make(chan *WSClient),
 		reqChan:   make(chan *msg.WSRequest),
+		closeChan: closeChan,
 	}
 }
 
@@ -63,6 +66,7 @@ func (r *WSRoom) Start() {
 	go func() {
 		select {
 		case req := <-r.reqChan:
+			common.LogfDebug("%+v", req)
 			break
 		case client := <-r.leaveChan:
 			_, ok := r.Clients[client.ClientID]
