@@ -4,10 +4,9 @@ type RequestType int
 
 const (
 	GameEvtReq RequestType = 0
-	JoinReq    RequestType = 1
-	LeaveReq   RequestType = 2
-	LockReq    RequestType = 3
-	UnlockReq  RequestType = 4
+	LeaveReq   RequestType = 1
+	LockReq    RequestType = 2
+	UnlockReq  RequestType = 3
 )
 
 type WSRequest struct {

@@ -21,8 +21,8 @@ const (
 )
 
 type PlayerIDPayload struct {
-	PlayerID        int   `json:"id"`
-	OtherPlayersIDs []int `json:"players"`
+	SubjectID int   `json:"subject"`
+	PlayerIDs []int `json:"players"`
 }
 
 type WSResponse struct {
