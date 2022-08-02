@@ -12,6 +12,7 @@ const (
 type WSRequest struct {
 	Type     RequestType `json:"type"`
 	SendTime int64       `json:"send"`
+	Sender   int         `json:"sender,omitempty"`
 	ID       string      `json:"id,omitempty"`
 	Name     string      `json:"name,omitempty"`
 	Payload  string      `json:"payload,omitempty"`

@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-var debugOn = false
+var debugOn = true
 
 func init() {
 	logLevel := os.Getenv("LOG_LEVEL")

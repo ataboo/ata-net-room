@@ -1,6 +1,8 @@
 package ws
 
 import (
+	"time"
+
 	"github.com/ataboo/ata-net-room/pkg/common"
 	"github.com/ataboo/ata-net-room/pkg/ws/msg"
 	"github.com/gorilla/websocket"
@@ -17,18 +19,30 @@ type WSRoom struct {
 	closeChan chan<- *WSRoom
 }
 
-func (r *WSRoom) AddUser(conn *websocket.Conn) error {
+func (r *WSRoom) allPlayers() []*msg.Player {
+	players := make([]*msg.Player, len(r.Clients))
+	idx := 0
+	for _, c := range r.Clients {
+		players[idx] = &msg.Player{
+			ID:   c.ClientID,
+			Name: c.Name,
+		}
+		idx += 1
+	}
+
+	return players
+}
+
+func (r *WSRoom) AddUser(conn *websocket.Conn, name string) error {
 	r.maxID += 1
 	id := r.maxID
 
-	otherPlayerIDs := make([]int, len(r.Clients))
-	for i, c := range r.Clients {
-		otherPlayerIDs[i] = c.ClientID
-	}
+	newClient := NewWSClient(conn, id, name)
+	r.Clients[id] = newClient
 
 	payload := msg.PlayerIDPayload{
 		SubjectID: id,
-		PlayerIDs: otherPlayerIDs,
+		PlayerIDs: r.allPlayers(),
 	}
 
 	youRes := msg.NewJoinResponse(true, payload)
@@ -37,16 +51,36 @@ func (r *WSRoom) AddUser(conn *websocket.Conn) error {
 	}
 
 	joinRes := msg.NewJoinResponse(false, payload)
-	r.BroadcastResponse(joinRes)
+	r.BroadcastResponse(&joinRes, id)
 
-	r.Clients[id] = NewWSClient(conn, id)
-	r.Clients[id].Start(r.leaveChan, r.reqChan)
+	newClient.Start(r.leaveChan, r.reqChan)
 
 	return nil
 }
 
-func (r *WSRoom) BroadcastResponse(res msg.WSResponse) {
-	panic("not implemented")
+func (r *WSRoom) BroadcastResponse(res *msg.WSResponse, exceptIDs ...int) {
+	if res.ID == "" {
+		res.ID = msg.GenUniqueID()
+	}
+
+	if res.RelayTime == 0 {
+		res.RelayTime = time.Now().UnixMilli()
+	}
+
+	exceptMap := map[int]bool{}
+	for _, id := range exceptIDs {
+		exceptMap[id] = true
+	}
+
+	for id, c := range r.Clients {
+		if _, ok := exceptMap[id]; ok {
+			continue
+		}
+
+		if !c.WriteResponse(res) {
+			r.leaveChan <- c
+		}
+	}
 }
 
 func NewWSRoom(req *msg.WSJoinRequest, closeChan chan<- *WSRoom) *WSRoom {
@@ -62,20 +96,80 @@ func NewWSRoom(req *msg.WSJoinRequest, closeChan chan<- *WSRoom) *WSRoom {
 	}
 }
 
+func (r *WSRoom) handleWSRequest(req *msg.WSRequest) {
+	switch req.Type {
+	case msg.GameEvtReq:
+		r.BroadcastResponse(&msg.WSResponse{
+			Type:     msg.GameEvtRes,
+			SendTime: req.SendTime,
+			Sender:   req.Sender,
+			ID:       req.ID,
+			Name:     req.Name,
+			Payload:  req.Payload,
+		}, req.Sender)
+	case msg.LockReq:
+		if r.Locked {
+			break
+		}
+		r.Locked = true
+		r.BroadcastResponse(&msg.WSResponse{
+			Type:     msg.LockRes,
+			SendTime: req.SendTime,
+			Sender:   req.Sender,
+			ID:       req.ID,
+		})
+	case msg.UnlockReq:
+		if !r.Locked {
+			break
+		}
+		r.Locked = false
+		r.BroadcastResponse(&msg.WSResponse{
+			Type:     msg.UnlockRes,
+			SendTime: req.SendTime,
+			Sender:   req.Sender,
+			ID:       req.ID,
+		})
+	default:
+		common.LogfInfo("request type not supported: %d", req.Type)
+	}
+}
+
 func (r *WSRoom) Start() {
 	go func() {
-		select {
-		case req := <-r.reqChan:
-			common.LogfDebug("%+v", req)
-			break
-		case client := <-r.leaveChan:
-			_, ok := r.Clients[client.ClientID]
-			if ok {
-				delete(r.Clients, client.ClientID)
-				close(client.writeChan)
+		defer func() {
+			for _, c := range r.Clients {
+				c.conn.Close()
 			}
 
-			break
+			r.closeChan <- r
+		}()
+
+		for {
+			select {
+			case req := <-r.reqChan:
+				common.LogfDebug("Request: %+v", req)
+				r.handleWSRequest(req)
+			case client := <-r.leaveChan:
+				_, ok := r.Clients[client.ClientID]
+				if ok {
+					common.LogfDebug("removing client: %d", client.ClientID)
+					delete(r.Clients, client.ClientID)
+					close(client.writeChan)
+				}
+
+				if len(r.Clients) == 0 {
+					common.LogfDebug("room %s has no clients.", r.Code)
+					return
+				} else {
+					payload := msg.PlayerIDPayload{
+						SubjectID: client.ClientID,
+						PlayerIDs: r.allPlayers(),
+					}
+					res := msg.NewLeaveResponse(payload)
+
+					r.BroadcastResponse(&res)
+				}
+			}
 		}
 	}()
 }

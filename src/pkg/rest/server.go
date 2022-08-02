@@ -18,6 +18,8 @@ func NewRestServer(config ws.ServerConfig) *RestServer {
 
 	server.initHandlers()
 
+	wsService.Start()
+
 	return server
 }
 
@@ -59,6 +61,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, data interface{}, status 
 	err := json.NewEncoder(w).Encode(data)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(status)

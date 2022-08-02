@@ -10,15 +10,17 @@ import (
 
 type WSClient struct {
 	ClientID  int
+	Name      string
 	conn      *websocket.Conn
 	writeChan chan *msg.WSResponse
 }
 
-func NewWSClient(conn *websocket.Conn, id int) *WSClient {
+func NewWSClient(conn *websocket.Conn, id int, name string) *WSClient {
 	return &WSClient{
 		conn:      conn,
 		writeChan: make(chan *msg.WSResponse),
 		ClientID:  id,
+		Name:      name,
 	}
 }
 
@@ -37,17 +39,18 @@ func (c *WSClient) readPump(leaveChan chan<- *WSClient, reqChan chan<- *msg.WSRe
 	c.conn.SetReadDeadline(time.Now().Add(PongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(PongWait)); return nil })
 	for {
-		c.conn.SetReadDeadline(time.Now().Add(ReadWait))
-		req := msg.WSRequest{}
+		req := &msg.WSRequest{}
 		err := c.conn.ReadJSON(req)
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				common.LogfInfo("error: %v", err)
 			}
+			common.LogfDebug("Client %d Read err: %s", c.ClientID, err.Error())
 			return
 		}
+		req.Sender = c.ClientID
 
-		reqChan <- &req
+		reqChan <- req
 	}
 }
 
@@ -87,7 +90,6 @@ func (c *WSClient) WriteResponse(res *msg.WSResponse) bool {
 	default:
 		close(c.writeChan)
 		return false
-
 	}
 }
 

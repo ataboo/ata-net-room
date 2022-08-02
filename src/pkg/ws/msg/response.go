@@ -21,14 +21,20 @@ const (
 )
 
 type PlayerIDPayload struct {
-	SubjectID int   `json:"subject"`
-	PlayerIDs []int `json:"players"`
+	SubjectID int       `json:"subject"`
+	PlayerIDs []*Player `json:"players"`
+}
+
+type Player struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 type WSResponse struct {
 	Type      ResponseType `json:"type"`
 	SendTime  int64        `json:"send"`
 	RelayTime int64        `json:"relay"`
+	Sender    int          `json:"sender"`
 	ID        string       `json:"id,omitempty"`
 	Name      string       `json:"name,omitempty"`
 	Payload   string       `json:"payload,omitempty"`
@@ -59,6 +65,14 @@ func NewJoinResponse(youJoin bool, payload PlayerIDPayload) WSResponse {
 	}
 }
 
+func NewLeaveResponse(payload PlayerIDPayload) WSResponse {
+	return WSResponse{
+		Type:     LeaveRes,
+		SendTime: time.Now().UnixMilli(),
+		Payload:  MustEncodeBase64Payload(payload),
+	}
+}
+
 func MustEncodeBase64Payload(v interface{}) string {
 	encoded, err := EncodeBase64Payload(v)
 	if err != nil {
@@ -74,7 +88,7 @@ func EncodeBase64Payload(v interface{}) (payload string, err error) {
 		return "", err
 	}
 
-	return base64.RawStdEncoding.EncodeToString(m), nil
+	return base64.StdEncoding.WithPadding('=').EncodeToString(m), nil
 }
 
 func GenUniqueID() string {

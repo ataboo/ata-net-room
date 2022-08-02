@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	MaxMessageSize = 512
+	MaxMessageSize = 2048
 	ReadWait       = 3 * time.Second
 	WriteWait      = 3 * time.Second
-	PongWait       = 60 * time.Second
-	PingPeriod     = 50 * time.Second
+	PongWait       = 10 * time.Second
+	PingPeriod     = 5 * time.Second
 )
 
 type ServerConfig struct {
@@ -67,6 +67,9 @@ func (s *WSService) HandleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	strMsg := string(msgBytes)
+	common.LogfDebug(strMsg)
+
 	req := msg.WSJoinRequest{}
 	if err := json.Unmarshal(msgBytes, &req); err != nil {
 		common.LogfDebug("failed to unmarshal message: %s", err.Error())
@@ -84,7 +87,7 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinReques
 		return
 	}
 
-	room, ok := s.Rooms[req.GameID]
+	room, ok := s.Rooms[req.RoomCode]
 	if !ok && req.AllowCreate {
 		if len(s.Rooms) >= s.config.RoomCapacity {
 			WriteResponse(conn, msg.NewRejectJoinResponse("failed to create room"))
@@ -95,7 +98,7 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinReques
 		newRoom := NewWSRoom(req, s.roomCloseChan)
 		newRoom.Start()
 
-		s.Rooms[req.GameID] = newRoom
+		s.Rooms[req.RoomCode] = newRoom
 		room = newRoom
 	} else {
 		if !ok {
@@ -106,10 +109,12 @@ func (s *WSService) createOrJoinRoom(conn *websocket.Conn, req *msg.WSJoinReques
 
 		if room.Locked || len(room.Clients) >= room.Capacity {
 			WriteResponse(conn, msg.NewRejectJoinResponse("join not allowed"))
+			conn.Close()
+			return
 		}
 	}
 
-	room.AddUser(conn)
+	room.AddUser(conn, req.PlayerName)
 }
 
 func (s *WSService) validate(req *msg.WSJoinRequest) (ok bool, messages []string) {
@@ -156,7 +161,9 @@ func (s *WSService) hasSubProtocolHeader(r *http.Request) bool {
 
 func (s *WSService) Start() {
 	go func() {
-		for room := range s.roomCloseChan {
+		for {
+			room := <-s.roomCloseChan
+			common.LogfDebug("removing room %s", room.Code)
 			delete(s.Rooms, room.Code)
 		}
 	}()
@@ -164,7 +171,8 @@ func (s *WSService) Start() {
 
 func NewWSService(config ServerConfig) *WSService {
 	return &WSService{
-		config: config,
-		Rooms:  make(map[string]*WSRoom),
+		config:        config,
+		Rooms:         make(map[string]*WSRoom),
+		roomCloseChan: make(chan *WSRoom),
 	}
 }
